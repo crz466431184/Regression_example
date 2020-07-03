@@ -1,0 +1,98 @@
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
+
+#some parameters
+N_train_samples = 600
+N_validation_samples = 100
+N_test_samples = 100
+N_samples = N_train_samples + N_validation_samples + N_test_samples
+noise_sig = 0.1
+N_epochs = 150
+batch_size = 8
+learning_rate = 0.01
+
+#define a new funtion to provide dataset
+tf.random.set_seed(0)
+np.random.seed(0)
+
+x = np.linspace(0.0, 3.0, N_samples, dtype=np.float32)
+y = np.expand_dims(np.sin(1.0+x*x) + noise_sig*np.random.randn(N_samples).astype(np.float32), axis=-1)
+y_true = np.sin(1.0+x*x)
+
+# Shuffle the data
+index = [i for i in range(len(x))]
+np.random.shuffle(index)
+x1 = x[index]
+y1 = y[index]
+
+# Partition the data
+x_train = x1[0:N_train_samples]
+y_train = y1[0:N_train_samples]
+x_validation = x1[N_train_samples:N_train_samples+N_validation_samples]
+y_validation = y1[N_train_samples:N_train_samples+N_validation_samples]
+x_test = x1[N_train_samples+N_validation_samples:N_samples]
+y_test = y1[N_train_samples+N_validation_samples:N_samples]
+train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train)).shuffle(buffer_size=N_train_samples).batch(batch_size).repeat()
+validation_ds = tf.data.Dataset.from_tensor_slices((x_validation, y_validation))
+test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+#Implement neural network
+class MyModel(object):
+    def __init__(self):
+        # Create model variables
+        self.W0 = tf.Variable(tf.random.normal([1, 10]))
+        self.b0 = tf.Variable(tf.random.normal([10]))
+        self.W1 = tf.Variable(tf.random.normal([10, 10]))
+        self.b1 = tf.Variable(tf.random.normal([10]))
+        self.W2 = tf.Variable(tf.random.normal([10, 1]))
+        self.b2 = tf.Variable(tf.random.normal([1]))
+        self.trainable_variables = [self.W0, self.b0, self.W1, self.b1, self.W2, self.b2]
+
+    def __call__(self, inputs):
+        # Compute forward pass
+        output = tf.reshape(inputs, [-1, 1])
+        output = tf.math.tanh(tf.add(tf.matmul(output, self.W0), self.b0))
+        output = tf.math.tanh(tf.add(tf.matmul(output, self.W1), self.b1))
+        output = tf.add(tf.matmul(output, self.W2), self.b2)
+        return output
+        
+mdl = MyModel()
+
+def train_step(model, optimizer, x, y):
+    with tf.GradientTape() as tape:
+        tape.watch(model.trainable_variables)
+        y_pred = model(x)# Compute a prediction with "model" on the input "x"
+        loss_val = tf.reduce_mean(tf.square(y_pred-y))# Compute the Mean Squared Error (MSE) for the prediction "y_pred" and the targets "y"
+    grads = tape.gradient(loss_val, model.trainable_variables)
+    optimizer.apply_gradients(zip(grads, model.trainable_variables))
+    return loss_val
+#training
+opt = tf.optimizers.RMSprop(learning_rate)
+epoch = 0
+train_iters = 0
+train_loss = 0.0
+
+for x_t, y_t in train_ds:
+    train_loss += train_step(mdl, opt, x_t, y_t)# Perform a training step with the model "mdl" and the optimizer "opt" on the inputs "x_t" and the corresponding targets "y_t"
+    train_iters += 1
+    if train_iters == N_train_samples//batch_size: # An epoch is completed
+        for x_v, y_v in validation_ds:
+            y_pred = mdl(x_v) # Compute a prediction with "mdl" on the input "x_v"
+            validation_loss = tf.reduce_mean(tf.square(y_pred-y_v))# Compute the Mean Squared Error (MSE) for the prediction "y_pred" and the targets "y_v"
+        print("Epoch: {} Train loss: {:.5} Validation loss: {:.5}".format(epoch, train_loss/train_iters, validation_loss))
+        train_iters = 0
+        train_loss = 0.0
+        epoch += 1
+    if (epoch == N_epochs):
+        break
+for x_t, y_t in test_ds:
+    y_pred = mdl(x_t)
+    test_loss = tf.reduce_mean(tf.square(y_pred-y_t))
+print("Test loss: {:.5}".format(test_loss))
+#Plot
+y_pred = mdl(x)
+plt.plot(x, y)
+plt.plot(x, y_true)
+plt.plot(x, y_pred.numpy())
+plt.legend(["Observation", "Target", "Prediction"])
+plt.show()
